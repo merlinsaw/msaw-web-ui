@@ -158,51 +158,40 @@ class CustomAgentMessagePrompt:
         self.step_info = step_info
 
     def get_user_message(self) -> HumanMessage:
-        if self.step_info:
-            step_info_description = f'Current step: {self.step_info.step_number + 1}/{self.step_info.max_steps}'
-        else:
-            step_info_description = ''
-
-        elements_text = self.state.element_tree.clickable_elements_to_string(include_attributes=self.include_attributes)
-        if not elements_text:
-            elements_text = 'empty page'
-        state_description = f"""
-{step_info_description}
-1. Task: {self.step_info.task}
-2. Hints(Optional): 
-{self.step_info.add_infos}
-3. Memory: 
-{self.step_info.memory}
-4. Current url: {self.state.url}
-5. Available tabs:
-{self.state.tabs}
-6. Interactive elements:
-{elements_text}
-        """
-
-        if self.result:
-            for i, result in enumerate(self.result):
-                if result.extracted_content:
-                    state_description += f"\nResult of action {i + 1}/{len(self.result)}: {result.extracted_content}"
-                if result.error:
-                    # only use last 300 characters of error
-                    error = result.error[-self.max_error_length:]
-                    state_description += (
-                        f"\nError of action {i + 1}/{len(self.result)}: ...{error}"
-                    )
-
-        if self.state.screenshot:
-            # Format message for vision model
-            return HumanMessage(
-                content=[
-                    {"type": "text", "text": state_description},
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/png;base64,{self.state.screenshot}"
-                        },
-                    },
-                ]
-            )
-
-        return HumanMessage(content=state_description)
+        """Format browser state as a human message"""
+        try:
+            # Build a clean state description
+            state_parts = []
+            
+            # Add URL information
+            if hasattr(self.state, 'current_url'):
+                state_parts.append(f"Current URL: {self.state.current_url}")
+            
+            # Add page title if available
+            if hasattr(self.state, 'page_title'):
+                state_parts.append(f"Page Title: {self.state.page_title}")
+            
+            # Add any error information
+            if self.result and any(r.error for r in self.result):
+                errors = [r.error for r in self.result if r.error]
+                truncated_errors = [e[:self.max_error_length] + '...' if len(e) > self.max_error_length else e for e in errors]
+                state_parts.append("Errors: " + '; '.join(truncated_errors))
+            
+            # Add step information if available
+            if self.step_info:
+                state_parts.append(f"Step {self.step_info.step_number}/{self.step_info.max_steps}")
+                if self.step_info.task:
+                    state_parts.append(f"Task: {self.step_info.task}")
+                if self.step_info.add_infos:
+                    state_parts.append(f"Additional Info: {self.step_info.add_infos}")
+            
+            # Join all parts with newlines
+            content = '\n'.join(state_parts)
+            
+            # Create a clean human message
+            return HumanMessage(content=content)
+            
+        except Exception as e:
+            logger.error(f"Error formatting user message: {e}")
+            # Return a simple message if anything fails
+            return HumanMessage(content="Error occurred while formatting browser state")
